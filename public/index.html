@@ -134,6 +134,15 @@
     <div id="res-bar" class="row gap wrap-row resbar" hidden>
       <input id="filter" placeholder="Filter by title, company, location…">
       <select id="sort"><option value="match">Best match</option><option value="date">Newest</option><option value="salary">Highest salary</option></select>
+      <select id="age" aria-label="Posted within">
+        <option value="">Posted: any time</option><option value="1">Last 24 hours</option><option value="3">Last 3 days</option>
+        <option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option>
+        <option value="custom">Custom range…</option>
+      </select>
+      <span id="age-custom" class="row gap" hidden>
+        <input id="age-from" type="date" aria-label="Posted from"> – <input id="age-to" type="date" aria-label="Posted to">
+      </span>
+      <label class="row gap small-t" title="Jobs whose post date could not be found on the board or the job page"><input id="age-unknown" type="checkbox" checked> Include unknown dates</label>
       <button id="export" class="ghost small" type="button">Export CSV</button>
       <span id="res-count" class="muted small-t"></span>
     </div>

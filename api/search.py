@@ -1,6 +1,12 @@
 """Job search endpoint backed by JobSpy (https://github.com/speedyapply/JobSpy)."""
+import json
 import math
-from concurrent.futures import ThreadPoolExecutor
+import re
+from concurrent.futures import ThreadPoolExecutor, wait
+from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+
+import requests
 
 from flask import Flask, jsonify, request
 from jobspy import scrape_jobs
@@ -11,6 +17,18 @@ ALLOWED_SITES = {"indeed", "linkedin", "zip_recruiter", "glassdoor", "google", "
 FIELDS = ["site", "title", "company", "location", "date_posted", "job_type", "is_remote",
           "interval", "min_amount", "max_amount", "currency", "job_url", "job_url_direct", "description"]
 MAX_DESC = 6000
+ENRICH_MAX = 25          # max job pages fetched to discover a missing post date
+ENRICH_BUDGET = 12       # seconds for all page fetches together
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+DATE_META = re.compile(
+    r"""<meta[^>]+(?:property|name|itemprop)=["'](?:article:published_time|og:published_time|datePosted|"""
+    r"""date|pubdate|publish[-_]date|article:modified_time|og:updated_time)["'][^>]*content=["']([^"']+)""",
+    re.I)
+DATE_ITEMPROP = re.compile(r"""itemprop=["']datePosted["'][^>]*(?:content|datetime)=["']([^"']+)""", re.I)
+JSONLD = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.I | re.S)
+RELATIVE = re.compile(r'(?:posted|active|updated)?\s*(\d+)\+?\s*(minute|hour|day|week|month)s?\s+ago', re.I)
 
 
 def clean(v):
@@ -24,6 +42,89 @@ def clean(v):
         return v
     s = str(v)
     return s if s not in ("nan", "NaT", "None") else None
+
+
+def to_date(v):
+    """Parse an ISO-ish date string to a date, or None."""
+    if not v:
+        return None
+    v = str(v).strip()
+    try:
+        return datetime.fromisoformat(v.replace("Z", "+00:00")[:25]).date()
+    except ValueError:
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", v)
+        return date(int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def find_posted(obj):
+    """Search JSON-LD for a JobPosting datePosted."""
+    if isinstance(obj, list):
+        for o in obj:
+            d = find_posted(o)
+            if d:
+                return d
+    elif isinstance(obj, dict):
+        if obj.get("datePosted"):
+            return obj["datePosted"]
+        for k in ("@graph", "mainEntity", "itemListElement"):
+            if k in obj:
+                d = find_posted(obj[k])
+                if d:
+                    return d
+    return None
+
+
+def page_date(url):
+    """Work out when a job page was posted: (iso date, source) or (None, None)."""
+    try:
+        r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"},
+                         timeout=5, allow_redirects=True)
+    except requests.RequestException:
+        return None, None
+    html = r.text[:600_000] if r.ok else ""
+    for block in JSONLD.findall(html):
+        try:
+            d = to_date(find_posted(json.loads(block.strip())))
+        except (ValueError, TypeError):
+            d = None
+        if d:
+            return d.isoformat(), "page"
+    for rx in (DATE_ITEMPROP, DATE_META):
+        m = rx.search(html)
+        if m and to_date(m[1]):
+            return to_date(m[1]).isoformat(), "page"
+    m = RELATIVE.search(re.sub(r"<[^>]+>", " ", html[:200_000]))
+    if m:
+        n, unit = int(m[1]), m[2].lower()
+        delta = {"minute": timedelta(minutes=n), "hour": timedelta(hours=n), "day": timedelta(days=n),
+                 "week": timedelta(weeks=n), "month": timedelta(days=30 * n)}[unit]
+        return (datetime.now(timezone.utc) - delta).date().isoformat(), "page"
+    lm = r.headers.get("Last-Modified")
+    if lm:
+        try:
+            return parsedate_to_datetime(lm).date().isoformat(), "page-modified"
+        except (TypeError, ValueError):
+            pass
+    return None, None
+
+
+def enrich_dates(jobs):
+    """Fill missing date_posted by inspecting the job page (bounded in count and time)."""
+    for j in jobs:
+        d = to_date(j.get("date_posted"))
+        j["date_posted"] = d.isoformat() if d else None
+        j["date_source"] = "posted" if d else None
+    todo = [j for j in jobs if not j["date_posted"] and (j.get("job_url_direct") or j.get("job_url"))][:ENRICH_MAX]
+    if not todo:
+        return
+    ex = ThreadPoolExecutor(max_workers=10)
+    futures = {ex.submit(page_date, j.get("job_url_direct") or j["job_url"]): j for j in todo}
+    done, _ = wait(futures, timeout=ENRICH_BUDGET)
+    for f in done:
+        d, src = f.result()
+        if d:
+            futures[f]["date_posted"], futures[f]["date_source"] = d, src
+    ex.shutdown(wait=False, cancel_futures=True)
 
 
 def scrape_site(site, p):
@@ -91,6 +192,7 @@ def search():
             continue
         seen.add(key)
         unique.append(j)
+    enrich_dates(unique)
     return jsonify(jobs=unique, count=len(unique), errors=errors)
 
 

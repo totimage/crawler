@@ -120,6 +120,13 @@ input[type="checkbox"] { width: auto; }
 .job h4 { margin: 0 0 2px; font-size: 15px; }
 .job h4 a { text-decoration: none; }
 .meta { display: flex; flex-wrap: wrap; gap: 3px 12px; color: var(--muted); font-size: 13px; }
+.age { font-size: 12px; }
+.age em { font-style: normal; color: var(--muted); }
+.age.fresh { color: var(--good); font-weight: 600; }
+.age.old { color: var(--warn); }
+.age.unknown { font-style: italic; }
+.resbar input[type="date"] { flex: none; min-width: 0; width: auto; }
+.resbar label input { width: auto; }
 .tag { font-size: 11px; border: 1px solid var(--border); border-radius: 99px; padding: 0 7px; }
 details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
 .desc { white-space: pre-wrap; font-size: 13px; max-height: 360px; overflow: auto; margin-top: 6px; overflow-wrap: anywhere; }

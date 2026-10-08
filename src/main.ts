@@ -291,14 +291,45 @@ function salary(j: any) {
   return `${j.currency || ""} ${f(j.min_amount)}–${f(j.max_amount)}${j.interval ? " / " + j.interval : ""}`.trim();
 }
 
+// ---------- post date / page age ----------
+const DAY = 86_400_000;
+const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+function postedMs(j: any): number | null {
+  if (!j.date_posted) return null;
+  const [y, m, d] = String(j.date_posted).slice(0, 10).split("-").map(Number);
+  return y ? new Date(y, m - 1, d).getTime() : null;
+}
+function ageLabel(j: any) {
+  const t = postedMs(j);
+  if (t == null) return `<span class="age unknown" title="No post date found on the job board or the job page">date unknown</span>`;
+  const days = Math.max(0, Math.round((today() - t) / DAY));
+  const txt = days === 0 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : `${Math.round(days / 30)} months ago`;
+  const src = j.date_source === "page" ? " · from job page" : j.date_source === "page-modified" ? " · page last modified" : "";
+  const fresh = days <= 3 ? " fresh" : days > 30 ? " old" : "";
+  return `<span class="age${fresh}" title="${esc(j.date_posted)}${src}">${j.date_source === "page-modified" ? "updated" : "posted"} ${txt}${src ? `<em>${src}</em>` : ""}</span>`;
+}
+function inAgeRange(j: any): boolean {
+  const mode = $<HTMLSelectElement>("#age").value;
+  if (!mode) return true;
+  const t = postedMs(j);
+  if (t == null) return $<HTMLInputElement>("#age-unknown").checked;
+  if (mode === "custom") {
+    const from = $<HTMLInputElement>("#age-from").valueAsDate, to = $<HTMLInputElement>("#age-to").valueAsDate;
+    // valueAsDate is UTC midnight; compare by calendar day
+    const day = (d: Date) => new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime();
+    return (!from || t >= day(from)) && (!to || t <= day(to));
+  }
+  return today() - t <= +mode * DAY;
+}
+
 function renderJobs() {
   const q = $<HTMLInputElement>("#filter").value.toLowerCase();
   const sort = $<HTMLSelectElement>("#sort").value;
-  const list = jobs.filter((j) => !q || [j.title, j.company, j.location].join(" ").toLowerCase().includes(q));
+  const list = jobs.filter((j) => (!q || [j.title, j.company, j.location].join(" ").toLowerCase().includes(q)) && inAgeRange(j));
   list.sort((a, b) =>
     sort === "match" ? b._match - a._match :
     sort === "salary" ? (b.max_amount || b.min_amount || 0) - (a.max_amount || a.min_amount || 0) :
-    String(b.date_posted || "").localeCompare(String(a.date_posted || "")));
+    (postedMs(b) ?? -Infinity) - (postedMs(a) ?? -Infinity));
   $("#res-count").textContent = `${list.length} of ${jobs.length} jobs`;
   $("#results").innerHTML = list.map((j) => `
     <article class="job">
@@ -306,7 +337,7 @@ function renderJobs() {
       <div class="job-body">
         <h4><a href="${esc(j.job_url_direct || j.job_url)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a></h4>
         <div class="meta"><strong>${esc(j.company)}</strong><span>${esc(j.location)}</span>
-          ${j.date_posted ? `<span>${esc(j.date_posted)}</span>` : ""}
+          ${ageLabel(j)}
           ${salary(j) ? `<span>${esc(salary(j))}</span>` : ""}
           <span class="tag">${esc(j.site)}</span>${j.job_type ? `<span class="tag">${esc(j.job_type)}</span>` : ""}${j.is_remote ? `<span class="tag">remote</span>` : ""}
         </div>
@@ -347,8 +378,10 @@ function initSearch() {
       if (!res.ok) throw new Error(data.error || res.statusText);
       jobs = data.jobs;
       scoreJobs();
+      const dated = jobs.filter((j) => j.date_posted).length, fromPage = jobs.filter((j) => j.date_source && j.date_source !== "posted").length;
+      const dateNote = ` ${dated}/${jobs.length} have a post date${fromPage ? ` (${fromPage} found from the job page)` : ""}.`;
       const errs = data.errors && Object.keys(data.errors).length ? ` Some sites failed: ${Object.keys(data.errors).join(", ")}.` : "";
-      $("#s-status").textContent = `Found ${jobs.length} jobs, ranked by match with your resume.${errs}`;
+      $("#s-status").textContent = `Found ${jobs.length} jobs, ranked by match with your resume.${dateNote}${errs}`;
       $("#res-bar").hidden = false;
       renderJobs();
     } catch (err: any) {
@@ -356,9 +389,11 @@ function initSearch() {
     } finally { btn.disabled = false; }
   });
   $("#filter").addEventListener("input", renderJobs);
+  $("#age").addEventListener("change", () => { $("#age-custom").hidden = $<HTMLSelectElement>("#age").value !== "custom"; renderJobs(); });
+  ["#age-from", "#age-to", "#age-unknown"].forEach((id) => $(id).addEventListener("change", renderJobs));
   $("#sort").addEventListener("change", renderJobs);
   $("#export").addEventListener("click", () => {
-    const cols = ["_match", "title", "company", "location", "site", "date_posted", "min_amount", "max_amount", "currency", "interval", "job_url"];
+    const cols = ["_match", "title", "company", "location", "site", "date_posted", "date_source", "min_amount", "max_amount", "currency", "interval", "job_url"];
     const csv = [["match", ...cols.slice(1)].join(","), ...jobs.map((j) => cols.map((c) => `"${String(j[c] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "jobs.csv"; a.click();
