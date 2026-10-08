@@ -6,6 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
+import html as htmlmod
+import logging
+import threading
+import time
+
 import requests
 
 from flask import Flask, jsonify, request
@@ -13,13 +18,46 @@ from jobspy import scrape_jobs
 
 app = Flask(__name__)
 
+
+class ThreadLog(logging.Handler):
+    """JobSpy logs board failures (e.g. HTTP 429) instead of raising; keep them per thread for the report."""
+
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.by_thread = {}
+
+    def emit(self, record):
+        self.by_thread.setdefault(threading.get_ident(), []).append(record.getMessage())
+
+    def take(self):
+        return self.by_thread.pop(threading.get_ident(), [])
+
+
+THREAD_LOG = ThreadLog()
+for name in ("JobSpy", "JobSpy:LinkedIn", "JobSpy:Indeed", "JobSpy:Glassdoor", "JobSpy:ZipRecruiter", "JobSpy:Google"):
+    logging.getLogger(name).addHandler(THREAD_LOG)
+
+
+def explain(messages):
+    """Turn JobSpy log lines into a short reason for the search report."""
+    text = " ".join(messages)
+    if "429" in text:
+        return "rate-limited by the site (HTTP 429), try again in a few minutes"
+    if re.search(r"\b40[13]\b", text):
+        return "blocked by the site"
+    if "not available" in text or "not found" in text:
+        return messages[-1][:160]
+    return messages[-1][:160] if messages else ""
+
 ALLOWED_SITES = {"indeed", "linkedin", "zip_recruiter", "glassdoor", "google", "bayt", "naukri"}
-FIELDS = ["site", "title", "company", "location", "date_posted", "job_type", "is_remote",
+FIELDS = ["site", "title", "company", "location", "date_posted", "job_type", "job_level", "is_remote",
           "interval", "min_amount", "max_amount", "currency", "job_url", "job_url_direct", "description"]
 MAX_DESC = 6000
 ENRICH_MAX = 25          # max job pages fetched to discover a missing post date
 ENRICH_BUDGET = 12       # seconds for all page fetches together
 SCRAPE_BUDGET = 75       # seconds for all board searches together
+LI_DETAIL_MAX = 150      # LinkedIn search results only carry a title; fetch details for up to this many
+LI_DETAIL_BUDGET = 25    # seconds for all LinkedIn detail fetches together
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -163,6 +201,58 @@ MIDDLE_EAST = {"bahrain", "israel", "kuwait", "oman", "qatar", "saudi arabia", "
 MAX_COUNTRIES = 10
 
 
+LI_DESC = re.compile(r'show-more-less-html__markup[^>]*>(.*?)</div>', re.S)
+LI_CRIT = re.compile(r'job-criteria-subheader">\s*(.*?)\s*</h3>\s*<span[^>]*>\s*(.*?)\s*</span>', re.S)
+
+
+def html_to_text(h):
+    h = re.sub(r"<\s*(br|/p|/li|/h\d)\s*/?>", "\n", h, flags=re.I)
+    h = re.sub(r"<li[^>]*>", "\n• ", h, flags=re.I)
+    t = htmlmod.unescape(re.sub(r"<[^>]+>", " ", h))
+    t = re.sub(r"[ \t\xa0]+", " ", t)
+    return re.sub(r"\n\s*\n+", "\n\n", t).strip()
+
+
+def linkedin_details(job):
+    """Fill description, seniority, employment type and industry from LinkedIn's public job page."""
+    m = re.search(r"(\d{6,})", job.get("job_url") or "")
+    if not m:
+        return
+    r = None
+    for attempt in range(3):  # LinkedIn throttles bursts with 429; back off and retry
+        try:
+            r = requests.get(f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{m[1]}",
+                             headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}, timeout=6)
+        except requests.RequestException:
+            return
+        if r.status_code != 429:
+            break
+        time.sleep(1.5 * (attempt + 1))
+    if r is None or r.status_code != 200:
+        return
+    d = LI_DESC.search(r.text)
+    if d:
+        job["description"] = html_to_text(d[1])[:MAX_DESC]
+    crit = {k.strip(): htmlmod.unescape(v.strip()) for k, v in LI_CRIT.findall(r.text)}
+    if crit.get("Seniority level") and crit["Seniority level"] != "Not Applicable":
+        job["job_level"] = crit["Seniority level"]
+    if crit.get("Employment type") and not job.get("job_type"):
+        job["job_type"] = crit["Employment type"].lower().replace("-", "")
+    if crit.get("Industries"):
+        job["industry"] = crit["Industries"]
+
+
+def enrich_linkedin(jobs):
+    todo = [j for j in jobs if j.get("site") == "linkedin" and not j.get("description")][:LI_DETAIL_MAX]
+    if not todo:
+        return 0, 0
+    ex = ThreadPoolExecutor(max_workers=6)
+    futures = [ex.submit(linkedin_details, j) for j in todo]
+    wait(futures, timeout=LI_DETAIL_BUDGET)
+    ex.shutdown(wait=False, cancel_futures=True)
+    return sum(1 for j in todo if j.get("description")), len(todo)
+
+
 def plan_tasks(sites, countries):
     """(site, country) pairs to scrape, plus notes about combinations that were skipped."""
     tasks, skipped = [], []
@@ -243,29 +333,48 @@ def search():
     params = dict(
         search_term=term[:120],
         location="" if many else (p.get("location") or "").strip()[:120],
-        results_wanted=max(1, min(int(p.get("results_wanted") or 20), 50)),
+        results_wanted=max(1, min(int(p.get("results_wanted") or 15), 30 if many else 50)),
         hours_old=int(p["hours_old"]) if p.get("hours_old") else None,
         job_type=p.get("job_type") if p.get("job_type") in {"fulltime", "parttime", "contract", "internship"} else None,
         is_remote=bool(p.get("is_remote")) or countries == ["worldwide"],
         fetch_description=bool(p.get("fetch_description")),
     )
-    if many:  # keep total work bounded when fanning out over countries
-        params["results_wanted"] = max(5, params["results_wanted"] // 2)
 
+    started = time.time()
     tasks, skipped = plan_tasks(sites, countries)
     label = (lambda s, c: f"{s} ({COUNTRIES[c][0]})") if many else (lambda s, c: s)
-    jobs, errors = [], {}
+    jobs, errors, report = [], {}, []
+
+    def timed(s, c):
+        t = time.time()
+        THREAD_LOG.take()
+        try:
+            rows = scrape_site(s, c, params)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(explain(THREAD_LOG.take()) or str(e)) from e
+        return rows, round(time.time() - t, 1), (explain(THREAD_LOG.take()) if not rows else "")
+
     # scrape every (site, country) in parallel so one slow/blocked board doesn't sink the rest
     ex = ThreadPoolExecutor(max_workers=min(16, max(1, len(tasks))))
-    futures = {ex.submit(scrape_site, s, c, params): (s, c) for s, c in tasks}
+    futures = {ex.submit(timed, s, c): (s, c) for s, c in tasks}
     done, pending = wait(futures, timeout=SCRAPE_BUDGET)
-    for f in done:
-        try:
-            jobs.extend(f.result())
-        except Exception as e:  # noqa: BLE001 - report per-site failure to the UI
-            errors[label(*futures[f])] = str(e)[:300]
-    for f in pending:
-        errors[label(*futures[f])] = "timed out"
+    for f, (s, c) in futures.items():
+        entry = {"site": s, "country": COUNTRIES[c][0]}
+        if f in pending:
+            errors[label(s, c)] = "timed out"
+            entry.update(status="timeout", count=0)
+        else:
+            try:
+                rows, secs, why = f.result()
+                jobs.extend(rows)
+                entry.update(status="ok", count=len(rows), secs=secs)
+                if why:  # zero rows because the board refused, not because nothing matched
+                    entry.update(status="error", error=why)
+                    errors[label(s, c)] = why
+            except Exception as e:  # noqa: BLE001 - report per-site failure to the UI
+                errors[label(s, c)] = str(e)[:300]
+                entry.update(status="error", count=0, error=str(e)[:200])
+        report.append(entry)
     ex.shutdown(wait=False, cancel_futures=True)
 
     seen, unique = set(), []
@@ -275,8 +384,11 @@ def search():
             continue
         seen.add(key)
         unique.append(j)
+    li_enriched, li_total = enrich_linkedin(unique)
     enrich_dates(unique)
-    return jsonify(jobs=unique, count=len(unique), errors=errors, skipped=skipped, countries=countries)
+    return jsonify(jobs=unique, count=len(unique), errors=errors, skipped=skipped, countries=countries,
+                   report=report, linkedin_enriched=li_enriched, linkedin_total=li_total, duplicates=len(jobs) - len(unique),
+                   seconds=round(time.time() - started, 1))
 
 
 if __name__ == "__main__":

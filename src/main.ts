@@ -1,8 +1,7 @@
 import { parseResumeFromPdf } from "lib/parse-resume-from-pdf";
 import type { Resume } from "lib/redux/types";
-import { checkResume, applyAllFixes, applyFix, detectKeywords, hasMetric, CheckResult, Memory, emptyMemory } from "./checker";
-import { findSkills } from "./skills";
-import { COUNTRIES, REGIONS, PRESETS, WORLDWIDE, byKey, detectCountry } from "./countries";
+import { checkResume, applyAllFixes, applyFix, hasMetric, CheckResult, Memory, emptyMemory } from "./checker";
+import { goSearch, initSearch } from "./search";
 import { downloadPdf, downloadDocx } from "./export";
 
 // ---------- state ----------
@@ -10,8 +9,6 @@ let original: Resume | null = null;
 let current: Resume | null = null;
 let originalScore = 0;
 let fileBase = "resume";
-let jobs: any[] = [];
-let searchResume: Resume | null = null;
 let mem: Memory = emptyMemory();
 let memKey = "";
 
@@ -238,205 +235,15 @@ function initImprove() {
     a.href = URL.createObjectURL(new Blob([JSON.stringify(current, null, 2)], { type: "application/json" }));
     a.download = `${fileBase}-updated.json`; a.click();
   });
-  $("#use-updated").addEventListener("click", () => goSearch(current!, "updated"));
-  $("#use-original").addEventListener("click", () => goSearch(original!, "uploaded"));
-  $("#skip-updated").addEventListener("click", () => goSearch(current!, "updated"));
-  $("#skip-original").addEventListener("click", () => goSearch(original!, "uploaded"));
+  $("#use-updated").addEventListener("click", () => startSearch(current!, "updated"));
+  $("#use-original").addEventListener("click", () => startSearch(original!, "uploaded"));
+  $("#skip-updated").addEventListener("click", () => startSearch(current!, "updated"));
+  $("#skip-original").addEventListener("click", () => startSearch(original!, "uploaded"));
   $("#back-1").addEventListener("click", () => showStep(1));
 }
 
-// ---------- step 3: job search ----------
-let searchKeywords: string[] = [];
-let countries: string[] = [];
-const MAX_COUNTRIES = 10;
+// ---------- step 3: job search (see search.ts) ----------
+function startSearch(r: Resume, which: string) { goSearch(r, which); showStep(3); }
 
-function renderCountries() {
-  $("#countries").innerHTML = countries.map((k, i) => `<span class="chip country">${esc(byKey(k)?.name || k)}<button type="button" data-rmc="${i}" aria-label="Remove">×</button></span>`).join("") ||
-    `<span class="muted small-t">No country selected. Add one or more below.</span>`;
-  $("#countries").querySelectorAll<HTMLButtonElement>("[data-rmc]").forEach((b) => b.addEventListener("click", () => { countries.splice(+b.dataset.rmc!, 1); renderCountries(); }));
-  $("#where-hint").textContent = countries.length > 1
-    ? `· ${countries.length}/${MAX_COUNTRIES} (city applies only when one country is selected)` : "";
-  const sel = $<HTMLSelectElement>("#add-country");
-  sel.innerHTML = `<option value="">+ Add country…</option><option value="${WORLDWIDE.key}"${countries.includes(WORLDWIDE.key) ? " disabled" : ""}>${WORLDWIDE.name}</option>` +
-    REGIONS.map((r) => `<optgroup label="${r}">${COUNTRIES.filter((c) => c.region === r)
-      .map((c) => `<option value="${c.key}"${countries.includes(c.key) ? " disabled" : ""}>${esc(c.name)}</option>`).join("")}</optgroup>`).join("");
-}
-function addCountries(keys: string[]) {
-  for (const k of keys) if (!countries.includes(k) && countries.length < MAX_COUNTRIES) countries.push(k);
-  renderCountries();
-}
+initUpload(); initImprove(); initSearch(() => showStep(2)); showStep(1);
 
-function goSearch(r: Resume, which: string) {
-  searchResume = r;
-  searchKeywords = detectKeywords(r);
-  // first title of the latest role, e.g. "Sr. UI/UX Designer, Product Design Consultant" -> "Sr. UI/UX Designer"
-  const title = (r.workExperiences.find((w) => w.jobTitle.trim())?.jobTitle || "").split(/[,|;]| - /)[0].trim();
-  $<HTMLInputElement>("#q").value = title;
-  const where = detectCountry(r.profile.location || "");
-  $<HTMLInputElement>("#loc").value = where.city;
-  countries = [where.country || "usa"];
-  renderCountries();
-  $("#search-src").textContent = `Using your ${which} resume (score ${checkResume(r).score}).`;
-  renderKeywords();
-  $("#results").innerHTML = ""; $("#res-bar").hidden = true; jobs = [];
-  showStep(3);
-}
-
-function renderKeywords() {
-  $("#skw").innerHTML = searchKeywords.map((k, i) => `<span class="chip">${esc(k)}<button data-rm="${i}" aria-label="Remove">×</button></span>`).join("") ||
-    `<span class="muted">No keywords. Add some below.</span>`;
-  $("#skw").querySelectorAll<HTMLButtonElement>("[data-rm]").forEach((b) => b.addEventListener("click", () => { searchKeywords.splice(+b.dataset.rm!, 1); renderKeywords(); scoreJobs(); renderJobs(); }));
-}
-
-function titleTokens(s: string) {
-  const stop = new Set(["and", "of", "the", "for", "to", "in", "a", "senior", "junior", "sr", "jr", "i", "ii", "iii", "lead"]);
-  return new Set(s.toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t.length > 1 && !stop.has(t)));
-}
-
-function scoreJobs() {
-  const titles = searchResume ? searchResume.workExperiences.map((w) => w.jobTitle).join(" ") + " " + $<HTMLInputElement>("#q").value : "";
-  const tt = titleTokens(titles);
-  const denom = Math.max(1, Math.min(searchKeywords.length, 12));
-  for (const j of jobs) {
-    const text = `${j.title || ""}\n${j.description || ""}`;
-    const matched = searchKeywords.length ? findSkills(text, searchKeywords).filter((k) => searchKeywords.some((s) => s.toLowerCase() === k.toLowerCase())) : [];
-    const jt = titleTokens(j.title || "");
-    const overlap = [...jt].filter((t) => tt.has(t)).length / Math.max(1, jt.size);
-    const kwScore = Math.min(1, matched.length / denom);
-    j._noDesc = !(j.description && j.description.length > 200);
-    j._matched = matched;
-    // same formula for every job; jobs without a description can only match on title keywords
-    j._match = Math.round(100 * (0.55 * kwScore + 0.45 * overlap));
-  }
-}
-
-function salary(j: any) {
-  if (!j.min_amount && !j.max_amount) return "";
-  const f = (n: number) => (n ? Math.round(n).toLocaleString() : "?");
-  return `${j.currency || ""} ${f(j.min_amount)}–${f(j.max_amount)}${j.interval ? " / " + j.interval : ""}`.trim();
-}
-
-// ---------- post date / page age ----------
-const DAY = 86_400_000;
-const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
-function postedMs(j: any): number | null {
-  if (!j.date_posted) return null;
-  const [y, m, d] = String(j.date_posted).slice(0, 10).split("-").map(Number);
-  return y ? new Date(y, m - 1, d).getTime() : null;
-}
-function ageLabel(j: any) {
-  const t = postedMs(j);
-  if (t == null) return `<span class="age unknown" title="No post date found on the job board or the job page">date unknown</span>`;
-  const days = Math.max(0, Math.round((today() - t) / DAY));
-  const txt = days === 0 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : `${Math.round(days / 30)} months ago`;
-  const src = j.date_source === "page" ? " · from job page" : j.date_source === "page-modified" ? " · page last modified" : "";
-  const fresh = days <= 3 ? " fresh" : days > 30 ? " old" : "";
-  return `<span class="age${fresh}" title="${esc(j.date_posted)}${src}">${j.date_source === "page-modified" ? "updated" : "posted"} ${txt}${src ? `<em>${src}</em>` : ""}</span>`;
-}
-function inAgeRange(j: any): boolean {
-  const mode = $<HTMLSelectElement>("#age").value;
-  if (!mode) return true;
-  const t = postedMs(j);
-  if (t == null) return $<HTMLInputElement>("#age-unknown").checked;
-  if (mode === "custom") {
-    const from = $<HTMLInputElement>("#age-from").valueAsDate, to = $<HTMLInputElement>("#age-to").valueAsDate;
-    // valueAsDate is UTC midnight; compare by calendar day
-    const day = (d: Date) => new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime();
-    return (!from || t >= day(from)) && (!to || t <= day(to));
-  }
-  return today() - t <= +mode * DAY;
-}
-
-function renderJobs() {
-  const q = $<HTMLInputElement>("#filter").value.toLowerCase();
-  const sort = $<HTMLSelectElement>("#sort").value;
-  const cf = $<HTMLSelectElement>("#country-filter").value;
-  const list = jobs.filter((j) => (!q || [j.title, j.company, j.location].join(" ").toLowerCase().includes(q)) && inAgeRange(j) && (!cf || j.country === cf));
-  list.sort((a, b) =>
-    sort === "match" ? b._match - a._match :
-    sort === "salary" ? (b.max_amount || b.min_amount || 0) - (a.max_amount || a.min_amount || 0) :
-    (postedMs(b) ?? -Infinity) - (postedMs(a) ?? -Infinity));
-  $("#res-count").textContent = `${list.length} of ${jobs.length} jobs`;
-  $("#results").innerHTML = list.map((j) => `
-    <article class="job">
-      <div class="match" style="--c:${scoreColor(j._match)}"><b>${j._match}%</b><span>match</span></div>
-      <div class="job-body">
-        <h4><a href="${esc(j.job_url_direct || j.job_url)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a></h4>
-        <div class="meta"><strong>${esc(j.company)}</strong><span>${esc(j.location)}</span>
-          ${ageLabel(j)}
-          ${salary(j) ? `<span>${esc(salary(j))}</span>` : ""}
-          <span class="tag">${esc(j.site)}</span>${j.country ? `<span class="tag">${esc(j.country)}</span>` : ""}${j.job_type ? `<span class="tag">${esc(j.job_type)}</span>` : ""}${j.is_remote ? `<span class="tag">remote</span>` : ""}
-        </div>
-        ${j._matched.length ? `<div class="matched">${j._matched.map((k: string) => `<span class="chip sm">${esc(k)}</span>`).join("")}</div>` : ""}
-        ${j._noDesc ? `<div class="muted small-t">No description returned; matched on title only. Tick "Full descriptions" for better LinkedIn matching.</div>` : ""}
-        ${j.description ? `<details><summary>Description</summary><div class="desc">${esc(j.description)}</div></details>` : ""}
-      </div>
-    </article>`).join("") || `<p class="muted">No jobs match the filter.</p>`;
-}
-
-function initSearch() {
-  $("#back-2").addEventListener("click", () => showStep(2));
-  $("#presets").innerHTML = Object.keys(PRESETS).map((p) => `<button type="button" class="ghost" data-preset="${esc(p)}">+ ${esc(p)}</button>`).join("") +
-    `<button type="button" class="link small" id="clear-countries">Clear</button>`;
-  $("#presets").querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((b) => b.addEventListener("click", () => addCountries(PRESETS[b.dataset.preset!])));
-  $("#clear-countries").addEventListener("click", () => { countries = []; renderCountries(); });
-  $("#add-country").addEventListener("change", (e) => { const el = e.target as HTMLSelectElement; if (el.value) addCountries([el.value]); });
-  $("#country-filter").addEventListener("change", renderJobs);
-  $("#kw-add").addEventListener("keydown", (e: KeyboardEvent) => {
-    const el = e.target as HTMLInputElement;
-    if (e.key === "Enter" && el.value.trim()) {
-      e.preventDefault();
-      el.value.split(",").map((s) => s.trim()).filter(Boolean).forEach((k) => searchKeywords.includes(k) || searchKeywords.push(k));
-      el.value = ""; renderKeywords(); scoreJobs(); renderJobs();
-    }
-  });
-  $("#sform").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target as HTMLFormElement);
-    const sites = fd.getAll("site") as string[];
-    if (!sites.length) { $("#s-status").textContent = "Pick at least one site."; return; }
-    if (!countries.length) { $("#s-status").textContent = "Add at least one country."; return; }
-    const body = {
-      search_term: fd.get("q"), location: countries.length === 1 ? fd.get("loc") : "", countries,
-      results_wanted: fd.get("n"), hours_old: fd.get("hours"), job_type: fd.get("jt"),
-      is_remote: fd.has("remote"), fetch_description: fd.has("desc"), sites,
-    };
-    const btn = $<HTMLButtonElement>("#s-go");
-    btn.disabled = true;
-    $("#s-status").textContent = `Searching ${sites.length} site(s) in ${countries.length} ${countries.length === 1 ? "country" : "countries"}… this can take up to ${countries.length > 3 ? "two minutes" : "a minute"}.`;
-    try {
-      const res = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const text = await res.text();
-      let data: any;
-      try { data = JSON.parse(text); } catch { throw new Error(res.status === 504 ? "Search timed out. Try fewer sites or results." : `Server error (${res.status})`); }
-      if (!res.ok) throw new Error(data.error || res.statusText);
-      jobs = data.jobs;
-      scoreJobs();
-      const seen = [...new Set(jobs.map((j) => j.country).filter(Boolean))].sort();
-      const cf = $<HTMLSelectElement>("#country-filter");
-      cf.innerHTML = `<option value="">All countries</option>` + seen.map((c) => `<option>${esc(c)}</option>`).join("");
-      cf.hidden = seen.length < 2;
-      const dated = jobs.filter((j) => j.date_posted).length, fromPage = jobs.filter((j) => j.date_source && j.date_source !== "posted").length;
-      const dateNote = ` ${dated}/${jobs.length} have a post date${fromPage ? ` (${fromPage} found from the job page)` : ""}.`;
-      const errs = data.errors && Object.keys(data.errors).length ? ` Some searches failed: ${Object.keys(data.errors).join(", ")}.` : "";
-      const skip = data.skipped?.length ? ` Skipped: ${data.skipped.join("; ")}.` : "";
-      $("#s-status").textContent = `Found ${jobs.length} jobs, ranked by match with your resume.${dateNote}${errs}${skip}`;
-      $("#res-bar").hidden = false;
-      renderJobs();
-    } catch (err: any) {
-      $("#s-status").textContent = "Error: " + err.message;
-    } finally { btn.disabled = false; }
-  });
-  $("#filter").addEventListener("input", renderJobs);
-  $("#age").addEventListener("change", () => { $("#age-custom").hidden = $<HTMLSelectElement>("#age").value !== "custom"; renderJobs(); });
-  ["#age-from", "#age-to", "#age-unknown"].forEach((id) => $(id).addEventListener("change", renderJobs));
-  $("#sort").addEventListener("change", renderJobs);
-  $("#export").addEventListener("click", () => {
-    const cols = ["_match", "title", "company", "location", "country", "site", "date_posted", "date_source", "min_amount", "max_amount", "currency", "interval", "job_url"];
-    const csv = [["match", ...cols.slice(1)].join(","), ...jobs.map((j) => cols.map((c) => `"${String(j[c] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "jobs.csv"; a.click();
-  });
-}
-
-initUpload(); initImprove(); initSearch(); showStep(1);

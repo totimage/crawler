@@ -30,6 +30,13 @@ export const SKILL_DICTIONARY: string[] = [
   "Jest", "Pytest", "System Design", "Distributed Systems", "Object-Oriented Programming", "Design Patterns",
   "API Design", "Performance Optimization", "Figma", "Sketch", "Adobe Photoshop", "Adobe Illustrator",
   "Adobe XD", "InDesign", "UX Design", "UI Design", "User Research", "Wireframing", "Prototyping",
+  "Design Systems", "Usability Testing", "Interaction Design", "Information Architecture", "Accessibility", "WCAG",
+  "Framer", "Webflow", "Miro", "FigJam", "Storybook", "Design Tokens", "Journey Mapping", "User Flows", "Personas",
+  "Motion Design", "After Effects", "Visual Design", "Product Design", "Design Thinking", "Heuristic Evaluation",
+  "Hotjar", "Mixpanel", "Amplitude", "Notion", "Asana", "Trello", "Responsive Design", "Mobile Design",
+  "Component Libraries", "Developer Handoff", "UX Writing", "Service Design", "Branding", "Typography",
+  "Illustration", "3D Modeling", "Blender", "Cinema 4D", "Zeplin", "InVision", "Principle", "ProtoPie",
+  "Conversion Optimization", "Data Visualization", "Dashboards", "SaaS", "B2B", "E-commerce", "Fintech", "Healthcare",
   // business / general
   "Project Management", "Product Management", "Program Management", "Stakeholder Management", "Roadmapping",
   "Budgeting", "Forecasting", "Financial Modeling", "Financial Analysis", "Accounting", "Bookkeeping", "QuickBooks",
@@ -67,4 +74,21 @@ export function findSkills(text: string, extra: string[] = []): string[] {
     if (new RegExp(`(^|[^A-Za-z0-9+#])${esc}([^A-Za-z0-9+#]|$)`, flags).test(text)) found.set(key, kw);
   }
   return [...found.values()];
+}
+
+// Generic soft skills: real, but useless for telling jobs apart.
+export const SOFT_SKILLS = new Set(["Communication", "Leadership", "Team Leadership", "Problem Solving", "Mentoring",
+  "Cross-functional Collaboration", "Strategic Planning", "Public Speaking", "Training", "Teaching", "Negotiation",
+  "Data-Driven Decision Making", "Documentation", "Microsoft Office", "Google Workspace", "Operations"].map((s) => s.toLowerCase()));
+
+const reCache = new Map<string, RegExp>();
+/** True if `kw` appears in `text` as a whole term (case-sensitive for ambiguous words like "Go"). */
+export function hasSkill(text: string, kw: string): boolean {
+  let re = reCache.get(kw);
+  if (!re) {
+    const e = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    re = new RegExp(`(^|[^A-Za-z0-9+#])${e}([^A-Za-z0-9+#]|$)`, CASE_SENSITIVE.has(kw) ? "" : "i");
+    reCache.set(kw, re);
+  }
+  return re.test(text);
 }

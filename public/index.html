@@ -97,64 +97,92 @@
   <section data-step="3" hidden>
     <div class="panel">
       <div class="row between wrap-row">
-        <h2 class="m0">Find matching jobs</h2>
+        <div>
+          <h2 class="m0">Find jobs</h2>
+          <p id="search-src" class="muted m0 small-t"></p>
+        </div>
         <button id="back-2" class="link" type="button">← Back to resume</button>
       </div>
-      <p id="search-src" class="muted"></p>
-      <form id="sform" class="sform">
-        <label class="f">Job title / keywords<input id="q" name="q" required></label>
-        <label class="f">City (optional)<input id="loc" name="loc" placeholder="e.g. Berlin, Austin, TX"></label>
-        <label class="f">Results per site<input name="n" type="number" value="20" min="1" max="50"></label>
-        <label class="f">Posted within
-          <select name="hours"><option value="">Any time</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168" selected>7 days</option><option value="720">30 days</option></select>
-        </label>
-        <label class="f">Job type
-          <select name="jt"><option value="">Any</option><option value="fulltime">Full-time</option><option value="parttime">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select>
-        </label>
-        <div class="wide where">
-          <div class="row between wrap-row">
-            <span class="muted small-t">Countries to search <span id="where-hint"></span></span>
-            <select id="add-country" aria-label="Add a country"></select>
+      <form id="sform" class="sgrid">
+        <div class="slabel">Role</div>
+        <div class="sfield">
+          <input id="q" required placeholder="Job title, e.g. UI/UX Designer" aria-label="Job title">
+          <div class="row wrap-row gap"><span class="muted small-t">From your resume:</span><div id="title-sugs" class="chips m0"></div></div>
+        </div>
+
+        <div class="slabel">Where</div>
+        <div class="sfield">
+          <div class="row wrap-row gap"><div id="countries" class="chips m0"></div><select id="add-country" aria-label="Add a country"></select></div>
+          <details class="regions"><summary>Add a whole region</summary><div id="presets" class="row wrap-row gap"></div></details>
+          <div class="row wrap-row gap">
+            <input id="loc" aria-label="City" class="city">
+            <label class="check"><input type="checkbox" name="remote"> Remote only</label>
           </div>
-          <div id="countries" class="chips"></div>
-          <div class="row wrap-row presets" id="presets"></div>
         </div>
-        <div class="wide row gap wrap-row checks">
-          <span class="muted small-t">Sites:</span>
-          <label><input type="checkbox" name="site" value="indeed" checked> Indeed</label>
-          <label><input type="checkbox" name="site" value="linkedin" checked> LinkedIn</label>
-          <label title="US and Canada only"><input type="checkbox" name="site" value="zip_recruiter"> ZipRecruiter <span class="muted">(US/CA)</span></label>
-          <label title="About 20 countries; skipped elsewhere"><input type="checkbox" name="site" value="glassdoor"> Glassdoor</label>
-          <label><input type="checkbox" name="site" value="google"> Google</label>
-          <label title="Middle East job board"><input type="checkbox" name="site" value="bayt"> Bayt <span class="muted">(Middle East)</span></label>
-          <label title="India job board"><input type="checkbox" name="site" value="naukri"> Naukri <span class="muted">(India)</span></label>
-          <span class="sep"></span>
-          <label><input type="checkbox" name="remote"> Remote only</label>
-          <label title="Fetch full LinkedIn descriptions for better matching (slower)"><input type="checkbox" name="desc"> Full descriptions (slower)</label>
+
+        <div class="slabel">Posted</div>
+        <div class="sfield">
+          <div class="row wrap-row gap">
+            <select id="age" aria-label="Posted within">
+              <option value="">Any time</option><option value="1">Last 24 hours</option><option value="3">Last 3 days</option>
+              <option value="7" selected>Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option>
+              <option value="custom">Custom range…</option>
+            </select>
+            <span id="age-custom" class="row gap" hidden><input id="age-from" type="date" aria-label="From"> – <input id="age-to" type="date" aria-label="To"></span>
+            <label class="check small-t" title="Jobs whose post date couldn't be found"><input id="age-unknown" type="checkbox" checked> include unknown dates</label>
+          </div>
+          <span id="age-note" class="hint"></span>
         </div>
-        <div class="wide">
-          <div class="muted small-t">Match keywords from your resume (click × to remove, type to add):</div>
-          <div id="skw" class="chips"></div>
-          <input id="kw-add" placeholder="Add keyword and press Enter" class="kw-add">
-        </div>
-        <div class="wide row gap"><button id="s-go" type="submit">Search jobs</button><span id="s-status" class="status"></span></div>
+
+        <details class="sadv">
+          <summary>Job boards &amp; options</summary>
+          <div class="row wrap-row gap checks">
+            <label><input type="checkbox" name="site" value="linkedin" checked> LinkedIn</label>
+            <label><input type="checkbox" name="site" value="indeed" checked> Indeed</label>
+            <label title="About 20 countries; skipped elsewhere"><input type="checkbox" name="site" value="glassdoor" checked> Glassdoor</label>
+            <label title="US and Canada only"><input type="checkbox" name="site" value="zip_recruiter"> ZipRecruiter <span class="muted">(US/CA)</span></label>
+            <label><input type="checkbox" name="site" value="google"> Google</label>
+            <label title="Middle East job board"><input type="checkbox" name="site" value="bayt"> Bayt <span class="muted">(Middle East)</span></label>
+            <label title="India job board"><input type="checkbox" name="site" value="naukri"> Naukri <span class="muted">(India)</span></label>
+          </div>
+          <div class="row wrap-row gap">
+            <label class="f inline">Results per board, per country <input name="n" type="number" value="15" min="5" max="50"></label>
+            <label class="f inline">Job type
+              <select name="jt"><option value="">Any</option><option value="fulltime">Full-time</option><option value="parttime">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select>
+            </label>
+          </div>
+        </details>
+
+        <div class="sactions"><button id="s-go" type="submit">Search jobs</button><span id="s-status" class="status"></span></div>
       </form>
     </div>
-    <div id="res-bar" class="row gap wrap-row resbar" hidden>
-      <input id="filter" placeholder="Filter by title, company, location…">
-      <select id="sort"><option value="match">Best match</option><option value="date">Newest</option><option value="salary">Highest salary</option></select>
-      <select id="age" aria-label="Posted within">
-        <option value="">Posted: any time</option><option value="1">Last 24 hours</option><option value="3">Last 3 days</option>
-        <option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option>
-        <option value="custom">Custom range…</option>
-      </select>
-      <span id="age-custom" class="row gap" hidden>
-        <input id="age-from" type="date" aria-label="Posted from"> – <input id="age-to" type="date" aria-label="Posted to">
-      </span>
-      <label class="row gap small-t" title="Jobs whose post date could not be found on the board or the job page"><input id="age-unknown" type="checkbox" checked> Include unknown dates</label>
+
+    <div id="report" class="panel" hidden>
+      <div class="row between wrap-row"><h3 class="m0">What the search found</h3><span id="report-sum" class="small-t"></span></div>
+      <details><summary class="small-t">Results per board and country</summary><div id="report-table" class="report-table"></div></details>
+    </div>
+
+    <div id="insights" class="cols2" hidden>
+      <div class="panel">
+        <h3 class="m0">Matching on</h3>
+        <p class="muted small-t">The skills from your resume that these employers ask for most (% = share of job descriptions that mention it). Jobs are ranked on these plus how well the title fits. Click a skill to drop it.</p>
+        <div id="kw-active" class="chips"></div>
+        <details><summary class="small-t"><span id="kw-more-n"></span></summary><div id="kw-more" class="chips"></div></details>
+        <input id="kw-add" placeholder="Add a keyword and press Enter" class="kw-add">
+      </div>
+      <div class="panel">
+        <h3 class="m0">Most requested in these jobs</h3>
+        <div id="demand"></div>
+      </div>
+    </div>
+
+    <div id="res-bar" class="resbar row gap wrap-row" hidden>
+      <input id="filter" placeholder="Search within results…" aria-label="Search within results">
+      <select id="country-filter" aria-label="Country" hidden></select>
+      <select id="sort" aria-label="Sort"><option value="match">Best match</option><option value="date">Newest</option><option value="salary">Highest salary</option></select>
+      <label class="check small-t" title="Hide jobs whose title doesn't contain your role (e.g. 'Designer')"><input id="hide-unrelated" type="checkbox" checked> Hide unrelated titles</label>
+      <span id="hidden-note" class="muted small-t"></span>
       <button id="export" class="ghost small" type="button">Export CSV</button>
-      <select id="country-filter" aria-label="Filter by country" hidden></select>
-      <span id="res-count" class="muted small-t"></span>
     </div>
     <div id="results"></div>
   </section>
