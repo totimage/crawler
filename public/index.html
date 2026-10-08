@@ -103,8 +103,7 @@
       <p id="search-src" class="muted"></p>
       <form id="sform" class="sform">
         <label class="f">Job title / keywords<input id="q" name="q" required></label>
-        <label class="f">Location<input id="loc" name="loc" placeholder="City, State"></label>
-        <label class="f">Country (Indeed/Glassdoor)<input name="country" value="USA"></label>
+        <label class="f">City (optional)<input id="loc" name="loc" placeholder="e.g. Berlin, Austin, TX"></label>
         <label class="f">Results per site<input name="n" type="number" value="20" min="1" max="50"></label>
         <label class="f">Posted within
           <select name="hours"><option value="">Any time</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168" selected>7 days</option><option value="720">30 days</option></select>
@@ -112,13 +111,23 @@
         <label class="f">Job type
           <select name="jt"><option value="">Any</option><option value="fulltime">Full-time</option><option value="parttime">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select>
         </label>
+        <div class="wide where">
+          <div class="row between wrap-row">
+            <span class="muted small-t">Countries to search <span id="where-hint"></span></span>
+            <select id="add-country" aria-label="Add a country"></select>
+          </div>
+          <div id="countries" class="chips"></div>
+          <div class="row wrap-row presets" id="presets"></div>
+        </div>
         <div class="wide row gap wrap-row checks">
           <span class="muted small-t">Sites:</span>
           <label><input type="checkbox" name="site" value="indeed" checked> Indeed</label>
           <label><input type="checkbox" name="site" value="linkedin" checked> LinkedIn</label>
-          <label><input type="checkbox" name="site" value="zip_recruiter"> ZipRecruiter</label>
-          <label><input type="checkbox" name="site" value="glassdoor"> Glassdoor</label>
+          <label title="US and Canada only"><input type="checkbox" name="site" value="zip_recruiter"> ZipRecruiter <span class="muted">(US/CA)</span></label>
+          <label title="About 20 countries; skipped elsewhere"><input type="checkbox" name="site" value="glassdoor"> Glassdoor</label>
           <label><input type="checkbox" name="site" value="google"> Google</label>
+          <label title="Middle East job board"><input type="checkbox" name="site" value="bayt"> Bayt <span class="muted">(Middle East)</span></label>
+          <label title="India job board"><input type="checkbox" name="site" value="naukri"> Naukri <span class="muted">(India)</span></label>
           <span class="sep"></span>
           <label><input type="checkbox" name="remote"> Remote only</label>
           <label title="Fetch full LinkedIn descriptions for better matching (slower)"><input type="checkbox" name="desc"> Full descriptions (slower)</label>
@@ -144,6 +153,7 @@
       </span>
       <label class="row gap small-t" title="Jobs whose post date could not be found on the board or the job page"><input id="age-unknown" type="checkbox" checked> Include unknown dates</label>
       <button id="export" class="ghost small" type="button">Export CSV</button>
+      <select id="country-filter" aria-label="Filter by country" hidden></select>
       <span id="res-count" class="muted small-t"></span>
     </div>
     <div id="results"></div>

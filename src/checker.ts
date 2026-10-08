@@ -176,7 +176,7 @@ export function checkResume(r: Resume, mem: Memory = emptyMemory()): CheckResult
   let c = 0;
   if (p.name.trim()) c += 3; else add({ id: "name", category: "Contact", severity: "high", message: "No name detected at the top of the resume." });
   if (/\S+@\S+\.\S+/.test(p.email)) c += 4; else add({ id: "email", category: "Contact", severity: "high", message: "No email address found. ATS systems require a reachable email." });
-  if (/\d{3}.*\d{4}/.test(p.phone)) c += 3; else add({ id: "phone", category: "Contact", severity: "medium", message: "No phone number found." });
+  if ((p.phone.match(/\d/g) || []).length >= 7) c += 3; else add({ id: "phone", category: "Contact", severity: "medium", message: "No phone number found." });
   if (p.location.trim()) c += 3; else add({ id: "location", category: "Contact", severity: "medium", message: "Add a location (City, State). Many recruiters filter by location, and it seeds your job search." });
   if (p.url.trim()) c += 2; else add({ id: "url", category: "Contact", severity: "low", message: "Add a LinkedIn, GitHub, or portfolio URL." });
   cats.push({ name: "Contact", score: c, max: 15 });

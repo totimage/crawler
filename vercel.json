@@ -5,7 +5,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/search.py": {
-      "maxDuration": 60
+      "maxDuration": 120
     }
   }
 }

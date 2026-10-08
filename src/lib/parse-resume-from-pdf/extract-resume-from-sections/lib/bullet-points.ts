@@ -37,7 +37,13 @@ export const getBulletPointsFromLines = (lines: Lines): string[] => {
     return lines.map((line) => line.map((item) => item.text).join(" "));
   }
 
-  // Otherwise, process and remove bullet points
+  // Otherwise, process and remove bullet points.
+  // [crawler] Keep any paragraph text that precedes the first bullet as its own description.
+  const intro = lines
+    .slice(0, firstBulletPointLineIndex)
+    .map((line) => line.map((item) => item.text).join(" ").trim())
+    .filter(Boolean)
+    .join(" ");
 
   // Combine all lines into a single string
   let lineStr = "";
@@ -60,10 +66,11 @@ export const getBulletPointsFromLines = (lines: Lines): string[] => {
   }
 
   // Divide the single string using bullet point as divider
-  return lineStr
+  const bullets = lineStr
     .split(commonBulletPoint)
     .map((text) => text.trim())
     .filter((text) => !!text);
+  return intro ? [intro, ...bullets] : bullets;
 };
 
 const getMostCommonBulletPoint = (str: string): string => {
@@ -106,6 +113,33 @@ const hasAtLeast8Words = (item: TextItem) =>
 export const getDescriptionsLineIdx = (lines: Lines): number | undefined => {
   // The main heuristic to determine descriptions is to check if has bullet point
   let idx = getFirstBulletPointLineIdx(lines);
+
+  // [crawler] Text between the date line and the first bullet is a role intro paragraph,
+  // so descriptions start right after the date line, e.g.
+  //   Company / Title / Apr 2025 - Present / <intro paragraph> / • bullet ...
+  if (idx !== undefined) {
+    const lineText = (i: number) => lines[i].map((item) => item.text).join(" ");
+    const isDateLine = (t: string) => /(?:19|20)\d{2}|Present|Current/i.test(t) && t.split(/\s+/).length <= 8;
+    let dateIdx = -1;
+    for (let i = 0; i < idx; i++) if (isDateLine(lineText(i))) dateIdx = i;
+    const hasParagraph = (from: number) => {
+      for (let i = from; i < idx!; i++) if (lineText(i).trim().split(/\s+/).length >= 8) return true;
+      return false;
+    };
+    if (dateIdx >= 0 && dateIdx + 1 < idx) {
+      // only when a real paragraph follows the date (a short line there is the job title)
+      if (hasParagraph(dateIdx + 1)) {
+        let start = dateIdx + 1;
+        while (start < idx && lineText(start).trim().split(/\s+/).length < 8) start++;
+        idx = start;
+      }
+    } else if (dateIdx < 0) {
+      // no date line: fall back to the first long (12+ words) line
+      for (let i = 1; i < idx; i++) {
+        if (lineText(i).trim().split(/\s+/).length >= 12) { idx = i; break; }
+      }
+    }
+  }
 
   // Fallback heuristic if the main heuristic doesn't apply (e.g. LinkedIn resume) to
   // check if the line has at least 8 words

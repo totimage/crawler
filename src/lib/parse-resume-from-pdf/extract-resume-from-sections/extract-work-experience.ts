@@ -7,7 +7,6 @@ import type {
 import { getSectionLinesByKeywords } from "lib/parse-resume-from-pdf/extract-resume-from-sections/lib/get-section-lines";
 import {
   DATE_FEATURE_SETS,
-  hasNumber,
   getHasText,
   isBold,
 } from "lib/parse-resume-from-pdf/extract-resume-from-sections/lib/common-features";
@@ -21,7 +20,7 @@ import {
 // prettier-ignore
 const WORK_EXPERIENCE_KEYWORDS_LOWERCASE = ['work', 'experience', 'employment', 'history', 'job'];
 // prettier-ignore
-const JOB_TITLES = ['Accountant', 'Administrator', 'Advisor', 'Agent', 'Analyst', 'Apprentice', 'Architect', 'Assistant', 'Associate', 'Auditor', 'Bartender', 'Biologist', 'Bookkeeper', 'Buyer', 'Carpenter', 'Cashier', 'CEO', 'Clerk', 'Co-op', 'Co-Founder', 'Consultant', 'Coordinator', 'CTO', 'Developer', 'Designer', 'Director', 'Driver', 'Editor', 'Electrician', 'Engineer', 'Extern', 'Founder', 'Freelancer', 'Head', 'Intern', 'Janitor', 'Journalist', 'Laborer', 'Lawyer', 'Lead', 'Manager', 'Mechanic', 'Member', 'Nurse', 'Officer', 'Operator', 'Operation', 'Photographer', 'President', 'Producer', 'Recruiter', 'Representative', 'Researcher', 'Sales', 'Server', 'Scientist', 'Specialist', 'Supervisor', 'Teacher', 'Technician', 'Trader', 'Trainee', 'Treasurer', 'Tutor', 'Vice', 'VP', 'Volunteer', 'Webmaster', 'Worker'];
+const JOB_TITLES = ['Accountant', 'Administrator', 'Advisor', 'Agent', 'Analyst', 'Apprentice', 'Architect', 'Assistant', 'Associate', 'Auditor', 'Bartender', 'Biologist', 'Bookkeeper', 'Buyer', 'Carpenter', 'Cashier', 'CEO', 'Clerk', 'Co-op', 'Co-Founder', 'Consultant', 'Coordinator', 'CTO', 'Developer', 'Designer', 'Director', 'Driver', 'Editor', 'Electrician', 'Engineer', 'Extern', 'Founder', 'Freelancer', 'Head', 'Intern', 'Janitor', 'Journalist', 'Laborer', 'Lawyer', 'Lead', 'Manager', 'Mechanic', 'Member', 'Nurse', 'Officer', 'Operator', 'Operation', 'Photographer', 'President', 'Producer', 'Recruiter', 'Representative', 'Researcher', 'Sales', 'Server', 'Scientist', 'Specialist', 'Supervisor', 'Teacher', 'Technician', 'Trader', 'Trainee', 'Treasurer', 'Tutor', 'Vice', 'VP', 'Volunteer', 'Webmaster', 'Worker', 'Artist', 'Strategist', 'Owner', 'Partner', 'Principal', 'Writer', 'Programmer', 'Animator', 'Illustrator', 'Planner', 'Instructor', 'Therapist', 'Pharmacist', 'Physician', 'Chef', 'Copywriter'];
 
 const hasJobTitle = (item: TextItem) =>
   JOB_TITLES.some((jobTitle) =>
@@ -30,7 +29,8 @@ const hasJobTitle = (item: TextItem) =>
 const hasMoreThan5Words = (item: TextItem) => item.text.split(/\s/).length > 5;
 const JOB_TITLE_FEATURE_SET: FeatureSet[] = [
   [hasJobTitle, 4],
-  [hasNumber, -4],
+  // [crawler] penalize dates, not any digit (so "3D Artist" still counts as a title)
+  [(item: TextItem) => /(?:19|20)\d{2}|\d{1,2}\/\d{2,4}/.test(item.text), -4],
   [hasMoreThan5Words, -2],
 ];
 

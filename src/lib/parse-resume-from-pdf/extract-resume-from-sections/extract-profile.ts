@@ -24,14 +24,18 @@ const hasAt = (item: TextItem) => item.text.includes("@");
 
 // Phone
 // Simple phone regex that matches (xxx)-xxx-xxxx where () and - are optional, - can also be space
+// [crawler] also international numbers like +40 746 463 188 or +44 (0)20 7946 0958
 export const matchPhone = (item: TextItem) =>
-  item.text.match(/\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/);
+  item.text.match(/\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/) ||
+  item.text.match(/\+\d{1,3}[\s.-]?(?:\(\d{1,4}\)[\s.-]?)?\d{2,4}(?:[\s.-]?\d{2,4}){1,4}/);
 const hasParenthesis = (item: TextItem) => /\([0-9]+\)/.test(item.text);
 
 // Location
 // Simple location regex that matches "<City>, <ST>"
+// [crawler] also "<City>, <Country>" with accented letters, e.g. "Brașov, Romania"
 export const matchCityAndState = (item: TextItem) =>
-  item.text.match(/[A-Z][a-zA-Z\s]+, [A-Z]{2}/);
+  item.text.match(/[A-Z][a-zA-Z\s]+, [A-Z]{2}/) ||
+  item.text.trim().match(/^\p{Lu}[\p{L}.' -]{1,30}, \p{Lu}[\p{L}.' -]{1,30}$/u);
 
 // Url
 // Simple url regex that matches "xxx.xxx/xxx" (xxx = anything not space)

@@ -2,6 +2,7 @@ import { parseResumeFromPdf } from "lib/parse-resume-from-pdf";
 import type { Resume } from "lib/redux/types";
 import { checkResume, applyAllFixes, applyFix, detectKeywords, hasMetric, CheckResult, Memory, emptyMemory } from "./checker";
 import { findSkills } from "./skills";
+import { COUNTRIES, REGIONS, PRESETS, WORLDWIDE, byKey, detectCountry } from "./countries";
 import { downloadPdf, downloadDocx } from "./export";
 
 // ---------- state ----------
@@ -49,7 +50,9 @@ function showStep(n: number) {
 async function handleFile(url: string, name: string) {
   $("#upload-status").textContent = "Parsing resume…";
   try {
-    const parsed = (await parseResumeFromPdf(url)) as Resume;
+    // tidy pdf.js spacing artifacts like "Figma , FigJam"
+    const parsed = JSON.parse(JSON.stringify(await parseResumeFromPdf(url)),
+      (_k, v) => (typeof v === "string" ? v.replace(/\s+([,.;:])/g, "$1").replace(/\s{2,}/g, " ").trim() : v)) as Resume;
     original = parsed;
     current = clone(parsed);
     mem = emptyMemory();
@@ -244,13 +247,35 @@ function initImprove() {
 
 // ---------- step 3: job search ----------
 let searchKeywords: string[] = [];
+let countries: string[] = [];
+const MAX_COUNTRIES = 10;
+
+function renderCountries() {
+  $("#countries").innerHTML = countries.map((k, i) => `<span class="chip country">${esc(byKey(k)?.name || k)}<button type="button" data-rmc="${i}" aria-label="Remove">×</button></span>`).join("") ||
+    `<span class="muted small-t">No country selected. Add one or more below.</span>`;
+  $("#countries").querySelectorAll<HTMLButtonElement>("[data-rmc]").forEach((b) => b.addEventListener("click", () => { countries.splice(+b.dataset.rmc!, 1); renderCountries(); }));
+  $("#where-hint").textContent = countries.length > 1
+    ? `· ${countries.length}/${MAX_COUNTRIES} (city applies only when one country is selected)` : "";
+  const sel = $<HTMLSelectElement>("#add-country");
+  sel.innerHTML = `<option value="">+ Add country…</option><option value="${WORLDWIDE.key}"${countries.includes(WORLDWIDE.key) ? " disabled" : ""}>${WORLDWIDE.name}</option>` +
+    REGIONS.map((r) => `<optgroup label="${r}">${COUNTRIES.filter((c) => c.region === r)
+      .map((c) => `<option value="${c.key}"${countries.includes(c.key) ? " disabled" : ""}>${esc(c.name)}</option>`).join("")}</optgroup>`).join("");
+}
+function addCountries(keys: string[]) {
+  for (const k of keys) if (!countries.includes(k) && countries.length < MAX_COUNTRIES) countries.push(k);
+  renderCountries();
+}
 
 function goSearch(r: Resume, which: string) {
   searchResume = r;
   searchKeywords = detectKeywords(r);
-  const title = r.workExperiences.find((w) => w.jobTitle.trim())?.jobTitle.trim() || "";
+  // first title of the latest role, e.g. "Sr. UI/UX Designer, Product Design Consultant" -> "Sr. UI/UX Designer"
+  const title = (r.workExperiences.find((w) => w.jobTitle.trim())?.jobTitle || "").split(/[,|;]| - /)[0].trim();
   $<HTMLInputElement>("#q").value = title;
-  $<HTMLInputElement>("#loc").value = r.profile.location || "";
+  const where = detectCountry(r.profile.location || "");
+  $<HTMLInputElement>("#loc").value = where.city;
+  countries = [where.country || "usa"];
+  renderCountries();
   $("#search-src").textContent = `Using your ${which} resume (score ${checkResume(r).score}).`;
   renderKeywords();
   $("#results").innerHTML = ""; $("#res-bar").hidden = true; jobs = [];
@@ -325,7 +350,8 @@ function inAgeRange(j: any): boolean {
 function renderJobs() {
   const q = $<HTMLInputElement>("#filter").value.toLowerCase();
   const sort = $<HTMLSelectElement>("#sort").value;
-  const list = jobs.filter((j) => (!q || [j.title, j.company, j.location].join(" ").toLowerCase().includes(q)) && inAgeRange(j));
+  const cf = $<HTMLSelectElement>("#country-filter").value;
+  const list = jobs.filter((j) => (!q || [j.title, j.company, j.location].join(" ").toLowerCase().includes(q)) && inAgeRange(j) && (!cf || j.country === cf));
   list.sort((a, b) =>
     sort === "match" ? b._match - a._match :
     sort === "salary" ? (b.max_amount || b.min_amount || 0) - (a.max_amount || a.min_amount || 0) :
@@ -339,7 +365,7 @@ function renderJobs() {
         <div class="meta"><strong>${esc(j.company)}</strong><span>${esc(j.location)}</span>
           ${ageLabel(j)}
           ${salary(j) ? `<span>${esc(salary(j))}</span>` : ""}
-          <span class="tag">${esc(j.site)}</span>${j.job_type ? `<span class="tag">${esc(j.job_type)}</span>` : ""}${j.is_remote ? `<span class="tag">remote</span>` : ""}
+          <span class="tag">${esc(j.site)}</span>${j.country ? `<span class="tag">${esc(j.country)}</span>` : ""}${j.job_type ? `<span class="tag">${esc(j.job_type)}</span>` : ""}${j.is_remote ? `<span class="tag">remote</span>` : ""}
         </div>
         ${j._matched.length ? `<div class="matched">${j._matched.map((k: string) => `<span class="chip sm">${esc(k)}</span>`).join("")}</div>` : ""}
         ${j._noDesc ? `<div class="muted small-t">No description returned; matched on title only. Tick "Full descriptions" for better LinkedIn matching.</div>` : ""}
@@ -350,6 +376,12 @@ function renderJobs() {
 
 function initSearch() {
   $("#back-2").addEventListener("click", () => showStep(2));
+  $("#presets").innerHTML = Object.keys(PRESETS).map((p) => `<button type="button" class="ghost" data-preset="${esc(p)}">+ ${esc(p)}</button>`).join("") +
+    `<button type="button" class="link small" id="clear-countries">Clear</button>`;
+  $("#presets").querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((b) => b.addEventListener("click", () => addCountries(PRESETS[b.dataset.preset!])));
+  $("#clear-countries").addEventListener("click", () => { countries = []; renderCountries(); });
+  $("#add-country").addEventListener("change", (e) => { const el = e.target as HTMLSelectElement; if (el.value) addCountries([el.value]); });
+  $("#country-filter").addEventListener("change", renderJobs);
   $("#kw-add").addEventListener("keydown", (e: KeyboardEvent) => {
     const el = e.target as HTMLInputElement;
     if (e.key === "Enter" && el.value.trim()) {
@@ -363,13 +395,15 @@ function initSearch() {
     const fd = new FormData(e.target as HTMLFormElement);
     const sites = fd.getAll("site") as string[];
     if (!sites.length) { $("#s-status").textContent = "Pick at least one site."; return; }
+    if (!countries.length) { $("#s-status").textContent = "Add at least one country."; return; }
     const body = {
-      search_term: fd.get("q"), location: fd.get("loc"), country: fd.get("country"),
+      search_term: fd.get("q"), location: countries.length === 1 ? fd.get("loc") : "", countries,
       results_wanted: fd.get("n"), hours_old: fd.get("hours"), job_type: fd.get("jt"),
       is_remote: fd.has("remote"), fetch_description: fd.has("desc"), sites,
     };
     const btn = $<HTMLButtonElement>("#s-go");
-    btn.disabled = true; $("#s-status").textContent = "Searching job boards… this can take up to a minute.";
+    btn.disabled = true;
+    $("#s-status").textContent = `Searching ${sites.length} site(s) in ${countries.length} ${countries.length === 1 ? "country" : "countries"}… this can take up to ${countries.length > 3 ? "two minutes" : "a minute"}.`;
     try {
       const res = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const text = await res.text();
@@ -378,10 +412,15 @@ function initSearch() {
       if (!res.ok) throw new Error(data.error || res.statusText);
       jobs = data.jobs;
       scoreJobs();
+      const seen = [...new Set(jobs.map((j) => j.country).filter(Boolean))].sort();
+      const cf = $<HTMLSelectElement>("#country-filter");
+      cf.innerHTML = `<option value="">All countries</option>` + seen.map((c) => `<option>${esc(c)}</option>`).join("");
+      cf.hidden = seen.length < 2;
       const dated = jobs.filter((j) => j.date_posted).length, fromPage = jobs.filter((j) => j.date_source && j.date_source !== "posted").length;
       const dateNote = ` ${dated}/${jobs.length} have a post date${fromPage ? ` (${fromPage} found from the job page)` : ""}.`;
-      const errs = data.errors && Object.keys(data.errors).length ? ` Some sites failed: ${Object.keys(data.errors).join(", ")}.` : "";
-      $("#s-status").textContent = `Found ${jobs.length} jobs, ranked by match with your resume.${dateNote}${errs}`;
+      const errs = data.errors && Object.keys(data.errors).length ? ` Some searches failed: ${Object.keys(data.errors).join(", ")}.` : "";
+      const skip = data.skipped?.length ? ` Skipped: ${data.skipped.join("; ")}.` : "";
+      $("#s-status").textContent = `Found ${jobs.length} jobs, ranked by match with your resume.${dateNote}${errs}${skip}`;
       $("#res-bar").hidden = false;
       renderJobs();
     } catch (err: any) {
@@ -393,7 +432,7 @@ function initSearch() {
   ["#age-from", "#age-to", "#age-unknown"].forEach((id) => $(id).addEventListener("change", renderJobs));
   $("#sort").addEventListener("change", renderJobs);
   $("#export").addEventListener("click", () => {
-    const cols = ["_match", "title", "company", "location", "site", "date_posted", "date_source", "min_amount", "max_amount", "currency", "interval", "job_url"];
+    const cols = ["_match", "title", "company", "location", "country", "site", "date_posted", "date_source", "min_amount", "max_amount", "currency", "interval", "job_url"];
     const csv = [["match", ...cols.slice(1)].join(","), ...jobs.map((j) => cols.map((c) => `"${String(j[c] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "jobs.csv"; a.click();
