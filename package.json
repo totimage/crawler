@@ -1,0 +1,19 @@
+{
+  "name": "crawler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Resume checker (OpenResume parser) + job crawler (JobSpy) web app",
+  "license": "AGPL-3.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve"
+  },
+  "dependencies": {
+    "docx": "^9.0.0",
+    "jspdf": "^2.5.2",
+    "pdfjs-dist": "3.11.174"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

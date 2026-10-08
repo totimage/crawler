@@ -1,0 +1,6 @@
+node_modules/
+public/bundle.js
+public/pdf.worker.min.js
+.vercel
+__pycache__/
+.venv/
